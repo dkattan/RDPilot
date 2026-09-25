@@ -215,6 +215,7 @@ typedef struct {
     int connection_type;
     bool network_auto_detect;
     bool use_network_level_authentication;
+    bool console_session;
     UINT32 keyboard_layout;
 } connection_params;
 

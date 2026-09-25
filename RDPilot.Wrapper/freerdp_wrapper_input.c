@@ -35,6 +35,8 @@ void process_pending_input(rdp_session* session)
     session->input_dropped = 0;
     LeaveCriticalSection(&session->input_lock);
 
+    if (event_count > 0)
+        fprintf(stderr, "[WRAPPER-INPUT] draining %u events (dropped=%u)\n", event_count, dropped);
     for (UINT32 i = 0; i < event_count; i++)
     {
         input_event* event = &events[i];

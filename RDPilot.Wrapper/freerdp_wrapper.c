@@ -13,6 +13,7 @@ rdp_session* session_from_context(rdpContext* context)
 
 static void emit_status(rdp_session* session, int status, const connection_error* error)
 {
+    fprintf(stderr, "[WRAPPER] emit_status %d entering\n", status);
     if (!session || !session->status_callback) return;
     session->status_callback(
         session,
@@ -934,6 +935,11 @@ static bool setup_instance(rdp_session* session, const connection_params* params
     freerdp_settings_set_string(settings, FreeRDP_Username, params->user);
     freerdp_settings_set_string(settings, FreeRDP_Password, params->password);
 
+    // /admin (console session) attach: shadow the machine console instead of a fresh
+    // virtual session. Used to record console logon flows (LogonUI → credential-provider
+    // logon → desktop) in one continuous take.
+    freerdp_settings_set_bool(settings, FreeRDP_ConsoleSession, params->console_session ? TRUE : FALSE);
+
     freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, CONNECT_TIMEOUT_MS);
     freerdp_settings_set_uint32(settings, FreeRDP_AutoReconnectMaxRetries, 0);
 
@@ -1131,7 +1137,18 @@ static DWORD WINAPI rdp_thread_func(LPVOID lpParam) {
 
     emit_status(session, 1, NULL);
 
-    gdi_init(session->instance, get_gdi_pixel_format(session->render_mode));
+    fprintf(stderr, "[WRAPPER] calling gdi_init\n");
+    BOOL gdi_rc = gdi_init(session->instance, get_gdi_pixel_format(session->render_mode));
+    fprintf(stderr, "[WRAPPER] gdi_init returned %d\n", (int)gdi_rc);
+    if (!gdi_rc)
+    {
+        fprintf(stderr, "[WRAPPER] gdi_init FAILED\n");
+    }
+    else
+    {
+        rdpGdi* cgdi = session->instance->context->gdi;
+        fprintf(stderr, "[WRAPPER] gdi_init ok %dx%d\n", cgdi ? cgdi->width : -1, cgdi ? cgdi->height : -1);
+    }
 
     // Hook callbacks after GDI init as it might override them
     session->instance->context->update->SurfaceBits = on_surface_bits;
@@ -1142,6 +1159,7 @@ static DWORD WINAPI rdp_thread_func(LPVOID lpParam) {
 
     free(params);
 
+    fprintf(stderr, "[WRAPPER] entering main loop\n");
     while (session->running) {
         ULONGLONG loop_start = GetTickCount64();
 
@@ -1226,7 +1244,7 @@ rdp_session* rdp_session_connect(const char* host, const char* connect_host, uin
                                  const char* gateway_host, const char* gateway_domain, const char* gateway_user, const char* gateway_password,
                                  int width, int height, int color_depth, bool compression, bool font_smoothing, bool bitmap_cache,
                                  bool desktop_wallpaper, bool themes, bool menu_animations, bool full_window_drag, int connection_type, bool network_auto_detect,
-                                 bool use_network_level_authentication,
+                                 bool use_network_level_authentication, bool console_session,
                                  uint32_t keyboard_layout, uint32_t dpi_scale_percent, uint32_t device_scale_percent,
                                  FrameCallback frame_callback, ClipboardTextCallback clipboard_text_callback, ClipboardFilesCallback clipboard_files_callback, StatusCallback status_callback, CertificateDecisionCallback certificate_decision_callback,
                                  CursorCallback cursor_callback) {
@@ -1299,6 +1317,7 @@ rdp_session* rdp_session_connect(const char* host, const char* connect_host, uin
     params->connection_type = (int)connection_type;
     params->network_auto_detect = network_auto_detect;
     params->use_network_level_authentication = use_network_level_authentication;
+    params->console_session = console_session;
     params->keyboard_layout = keyboard_layout;
 
 #if defined(_WIN32)
