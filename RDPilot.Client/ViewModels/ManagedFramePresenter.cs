@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using Avalonia;
 using Avalonia.Media.Imaging;
@@ -35,6 +36,19 @@ internal sealed class ManagedFramePresenter : IDisposable
     private double _inputToFrameMaxMs;
     private long _lastReceivedTicks;
 
+    // Headless capture: timer-driven so static screens (no RDP frame updates) are still
+    // capturable. See CaptureTick for marker and periodic modes.
+    private System.Threading.Timer? _captureTimer;
+    private readonly string? _dumpDir;
+    private readonly int _captureEveryMs;
+    private DateTime _lastCaptureUtc = DateTime.MinValue;
+
+    /// <summary>
+    /// Raised when the headless driver drops an input command marker (input.now). Content:
+    /// "cad" = Ctrl+Alt+Del; "click" or "click:x,y" = left click at normalized 0-65535 coords.
+    /// </summary>
+    public event EventHandler<string>? HeadlessInputRequested;
+
     public delegate bool PresentDelegate(IntPtr dest, int destStride, int destWidth, int destHeight, out int dirtyX, out int dirtyY, out int dirtyWidth, out int dirtyHeight, out int fbWidth, out int fbHeight);
 
     public ManagedFramePresenter(string sessionTitle, int width, int height, Action<WriteableBitmap?> setScreen, Action requestRedraw, PresentDelegate present, double renderScaling = 1.0, bool initializeBitmap = true)
@@ -44,6 +58,13 @@ internal sealed class ManagedFramePresenter : IDisposable
         _requestRedraw = requestRedraw;
         _present = present;
         _renderScaling = renderScaling > 0 ? renderScaling : 1.0;
+        _dumpDir = Environment.GetEnvironmentVariable("RDPILOT_DUMP_DIR");
+        _captureEveryMs = int.TryParse(Environment.GetEnvironmentVariable("RDPILOT_CAPTURE_MS"), out var every) && every >= 250 ? every : 0;
+        if (!string.IsNullOrWhiteSpace(_dumpDir))
+        {
+            var periodMs = _captureEveryMs > 0 ? _captureEveryMs : 500;
+            _captureTimer = new System.Threading.Timer(CaptureTick, null, periodMs, periodMs);
+        }
         if (initializeBitmap)
         {
             _screen = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
@@ -91,6 +112,9 @@ internal sealed class ManagedFramePresenter : IDisposable
             return;
         }
 
+        _captureTimer?.Dispose();
+        _captureTimer = null;
+
         lock (_frameLock)
         {
             _pendingCount = 0;
@@ -101,6 +125,82 @@ internal sealed class ManagedFramePresenter : IDisposable
 
     private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     private bool IsSuspended => Volatile.Read(ref _suspended) != 0;
+
+    /// <summary>
+    /// Headless capture hook, driven by a timer (RDPILOT_DUMP_DIR set):
+    ///  - marker mode: a "shot.now" file in the dump dir requests a one-shot PNG of the
+    ///    latest framebuffer; the marker is consumed on capture. Works even for static
+    ///    screens that produce no RDP frame updates.
+    ///  - periodic mode: RDPILOT_CAPTURE_MS set (>= 250) captures a timestamped PNG burst
+    ///    at that interval, giving external drivers a frame sequence to record from.
+    /// Best-effort by design: capture failures never disturb the present path.
+    /// </summary>
+    private void CaptureTick(object? state)
+    {
+        if (IsDisposed || string.IsNullOrWhiteSpace(_dumpDir)) return;
+
+        // Headless driver input commands (input.now): do not require a screen - a click is
+        // exactly how the driver wakes the remote lock screen before capturing.
+        var inputMarker = Path.Combine(_dumpDir, "input.now");
+        if (File.Exists(inputMarker))
+        {
+            string command = string.Empty;
+            try { command = File.ReadAllText(inputMarker).Trim(); } catch { }
+            try { File.Delete(inputMarker); } catch { }
+            if (command.Length > 0)
+            {
+                try { HeadlessInputRequested?.Invoke(this, command); } catch { }
+            }
+        }
+
+        var screen = _screen;
+        if (screen == null) return;
+
+        var marker = Path.Combine(_dumpDir, "shot.now");
+        var wantShot = File.Exists(marker);
+        var wantPeriodic = _captureEveryMs > 0 && (DateTime.UtcNow - _lastCaptureUtc).TotalMilliseconds >= _captureEveryMs;
+        if (!wantShot && !wantPeriodic) return;
+
+        try
+        {
+            Directory.CreateDirectory(_dumpDir);
+            // Marker content optionally names the capture (e.g. "1-tile" -> shot-1-tile.png);
+            // empty content falls back to a timestamped name.
+            var requested = wantShot ? File.ReadAllText(marker).Trim() : null;
+            var baseName = wantShot
+                ? (string.IsNullOrWhiteSpace(requested)
+                    ? $"shot-{DateTime.Now:yyyyMMdd-HHmmss-fff}"
+                    : $"shot-{MakeSafeFileName(requested)}")
+                : $"frame-{DateTime.Now:yyyyMMdd-HHmmss-fff}";
+            var file = Path.Combine(_dumpDir, baseName + ".png");
+            using (var fs = File.Create(file))
+            {
+                screen.Save(fs);
+            }
+            _lastCaptureUtc = DateTime.UtcNow;
+            // Consume the marker only after a successful save so a transient failure
+            // (locked file, IO hiccup) is retried on the next tick instead of lost.
+            if (wantShot) File.Delete(marker);
+        }
+        catch (Exception ex)
+        {
+            // Capture is best-effort; never disturb the present path. Leave the marker
+            // in place for retry and log for the headless driver.
+            try
+            {
+                File.AppendAllText(Path.Combine(_dumpDir, "trace.log"),
+                    $"[{DateTime.Now:HH:mm:ss.fff}] capture failed: {ex.Message}{Environment.NewLine}");
+            }
+            catch { }
+        }
+    }
+
+    private static string MakeSafeFileName(string name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var chars = name.Select(c => invalid.Contains(c) ? '-' : c).ToArray();
+        return new string(chars);
+    }
 
     public void Suspend()
     {

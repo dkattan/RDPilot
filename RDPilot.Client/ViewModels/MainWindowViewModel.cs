@@ -119,8 +119,10 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
+            HeadlessTrace($"init start launchId={_launchOptions.ConnectionId ?? "(none)"}");
             _settings = await _settingsStore.LoadAsync();
             await RefreshConnectionsAsync();
+            HeadlessTrace($"init loaded connections={Connections.Count}");
 
             // A saved profile is not an active choice until the user selects it.
             // This avoids presenting an ambiguous Connect action in the empty viewport.
@@ -132,11 +134,13 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (!string.IsNullOrWhiteSpace(_launchOptions.ConnectionId))
             {
+                HeadlessTrace("init auto-connecting");
                 await ConnectByIdAsync(_launchOptions.ConnectionId);
             }
         }
         catch (Exception ex)
         {
+            HeadlessTrace($"init failed: {ex.GetType().Name}: {ex.Message}");
             StatusMessage = $"Unable to load saved connections: {ex.Message}";
         }
     }
@@ -260,15 +264,26 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
         string password;
         string gatewayPassword;
 
-        try
+        if (string.IsNullOrWhiteSpace(connection.Username))
         {
-            password = await _connectionStore.GetPasswordAsync(connection) ?? "";
-            gatewayPassword = await _connectionStore.GetGatewayPasswordAsync(connection) ?? "";
+            // Credential-less (view-only) connect: no NLA, no auto-logon, no session created
+            // on the target. Used by headless drivers to watch a console logon screen without
+            // claiming the console.
+            password = "";
+            gatewayPassword = "";
         }
-        catch (Exception ex)
+        else
         {
-            StatusMessage = $"Unable to read password from {SecretStoreDescription}: {ex.Message}";
-            return;
+            try
+            {
+                password = await _connectionStore.GetPasswordAsync(connection) ?? "";
+                gatewayPassword = await _connectionStore.GetGatewayPasswordAsync(connection) ?? "";
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Unable to read password from {SecretStoreDescription}: {ex.Message}";
+                return;
+            }
         }
 
         StatusMessage = $"Opening {connection.Name}...";
@@ -472,6 +487,7 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task ConnectByIdAsync(string connectionId)
     {
         var connection = Connections.FirstOrDefault(candidate => string.Equals(candidate.Id, connectionId, StringComparison.OrdinalIgnoreCase));
+        HeadlessTrace($"connect-by-id id={connectionId} found={(connection != null)} total={Connections.Count}");
         if (connection == null)
         {
             StatusMessage = "The requested saved connection no longer exists.";
@@ -480,6 +496,20 @@ public partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         SelectedConnection = connection;
         await ConnectAsync();
+    }
+
+    /// <summary>Headless driver hook: append debug traces to RDPILOT_DUMP_DIR/trace.log.</summary>
+    internal static void HeadlessTrace(string message)
+    {
+        try
+        {
+            var dumpDir = Environment.GetEnvironmentVariable("RDPILOT_DUMP_DIR");
+            if (!string.IsNullOrWhiteSpace(dumpDir))
+            {
+                File.AppendAllText(System.IO.Path.Combine(dumpDir, "trace.log"), $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}");
+            }
+        }
+        catch { }
     }
 
     private void OnRemoteClipboardFilesReceived(RdpSessionViewModel session, string[] filePaths)

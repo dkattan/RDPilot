@@ -931,9 +931,15 @@ static bool setup_instance(rdp_session* session, const connection_params* params
     freerdp_settings_set_string(settings, FreeRDP_UserSpecifiedServerName, params->host);
     freerdp_settings_set_string(settings, FreeRDP_CertificateName, params->host);
     freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, params->port);
-    freerdp_settings_set_string(settings, FreeRDP_Domain, params->domain);
-    freerdp_settings_set_string(settings, FreeRDP_Username, params->user);
-    freerdp_settings_set_string(settings, FreeRDP_Password, params->password);
+    if (params->user[0] == '\0') {
+        // Credential-less (view-only) connect: do not attempt a logon at all. The server's
+        // logon screen is the desired view - no session is created on the target.
+        freerdp_settings_set_bool(settings, FreeRDP_AutoLogonEnabled, FALSE);
+    } else {
+        freerdp_settings_set_string(settings, FreeRDP_Domain, params->domain);
+        freerdp_settings_set_string(settings, FreeRDP_Username, params->user);
+        freerdp_settings_set_string(settings, FreeRDP_Password, params->password);
+    }
 
     // /admin (console session) attach: shadow the machine console instead of a fresh
     // virtual session. Used to record console logon flows (LogonUI → credential-provider

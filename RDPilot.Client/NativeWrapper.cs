@@ -144,6 +144,7 @@ internal static class NativeWrapper
             int connectionType,
             [MarshalAs(UnmanagedType.I1)] bool networkAutoDetect,
             [MarshalAs(UnmanagedType.I1)] bool useNetworkLevelAuthentication,
+            [MarshalAs(UnmanagedType.I1)] bool consoleSession,
             uint keyboardLayout,
             uint dpiScalePercent,
             uint deviceScalePercent,

@@ -116,6 +116,7 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
         _cursorCallback = OnCursorChanged;
         _certificateTrustDecision = certificateTrustDecision;
         _framePresenter = new ManagedFramePresenter(Title, width, height, screen => Screen = screen, () => RequestRedraw?.Invoke(this, EventArgs.Empty), PresentPending, _renderScaling);
+        _framePresenter.HeadlessInputRequested += OnHeadlessInputRequested;
         _cursorCache = new RemoteCursorCache(CopyCursorImage);
 
         try
@@ -124,6 +125,7 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
             var keyboardLayout = NativeWrapper.GetCurrentKeyboardLayout();
             var networkSettings = RdpSessionOptions.NormalizeNetworkSettings(connectionType);
             var useNetworkLevelAuthentication = RdpSessionOptions.ShouldUseNetworkLevelAuthentication(connection.Username, password);
+            MainWindowViewModel.HeadlessTrace($"connecting host={connection.Host} connectHost={connectHost} port={connection.Port} user={connection.Domain}\\{connection.Username} consoleSession={connection.ConsoleSession} passwordLen={password?.Length ?? 0} nla={useNetworkLevelAuthentication} width={width} height={height}");
             Volatile.Write(ref _initializingNativeSession, 1);
             _nativeSession = NativeRdpSession.Connect(
                 connection.Host,
@@ -149,6 +151,7 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
                 networkSettings.ConnectionType,
                 networkSettings.NetworkAutoDetect,
                 useNetworkLevelAuthentication,
+                connection.ConsoleSession,
                 keyboardLayout,
                 _dpiScalePercent,
                 _deviceScalePercent,
@@ -162,6 +165,7 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
+            MainWindowViewModel.HeadlessTrace($"native-load-failed: {ex.Message}");
             LastError = new RdpSessionError(0, "WRAPPER_NATIVE_LOAD_FAILED", ex.Message, RdpSessionErrorKind.Unknown);
             Status = RdpSessionStatus.Failed;
             return;
@@ -343,6 +347,35 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Dispatches headless driver input commands (input.now marker content).
+    /// "cad" = secure attention sequence; "click" / "click:x,y" = left click with
+    /// x,y normalized to 0-65535 (RDP wire format, defaults to screen center).
+    /// </summary>
+    private void OnHeadlessInputRequested(object? sender, string command)
+    {
+        if (string.Equals(command, "cad", StringComparison.OrdinalIgnoreCase))
+        {
+            SendCtrlAltDel();
+            return;
+        }
+        if (command.StartsWith("click", StringComparison.OrdinalIgnoreCase))
+        {
+            var x = (ushort)32768;
+            var y = (ushort)32768;
+            var args = command.Length > 5 ? command[5..].Split(',') : Array.Empty<string>();
+            if (args.Length == 2 && ushort.TryParse(args[0], out var ax) && ushort.TryParse(args[1], out var ay))
+            {
+                x = ax;
+                y = ay;
+            }
+            const ushort down = 0x8000;
+            const ushort button1 = 0x1000;
+            SendMouseEvent((ushort)(down | button1), x, y);
+            SendMouseEvent(button1, x, y);
+        }
+    }
+
+    /// <summary>
     /// Sends Ctrl+Alt+Del to the remote host. The secure attention sequence can never be
     /// intercepted locally, so this explicit action is the only way to deliver it.
     /// </summary>
@@ -433,7 +466,21 @@ public partial class RdpSessionViewModel : ViewModelBase, IDisposable
             ? RdpSessionError.Create(errorCode, errorName, errorMessage)
             : null;
 
+        // Headless driver hook: mirror every status transition to a JSONL file in the
+        // dump dir so external automation can observe connect/fail/disconnect.
+        try
+        {
+            var dumpDir = Environment.GetEnvironmentVariable("RDPILOT_DUMP_DIR");
+            if (!string.IsNullOrWhiteSpace(dumpDir))
+            {
+                var line = $"{{\"t\":\"{DateTime.Now:HH:mm:ss.fff}\",\"status\":{status},\"code\":{errorCode},\"name\":\"{errorName}\",\"message\":\"{errorMessage?.Replace("\"", "'")}\"}}";
+                File.AppendAllText(System.IO.Path.Combine(dumpDir, "status.log"), line + Environment.NewLine);
+            }
+        }
+        catch { }
+
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+
         {
             if (!IsCurrentOrInitializingCallbackSession(session)) return;
             LastError = error;

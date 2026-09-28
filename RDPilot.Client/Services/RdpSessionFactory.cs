@@ -62,6 +62,13 @@ return new RdpSessionViewModel(
 
     private CertificateTrustDecision DecideCertificateTrust(RdpCertificatePrompt prompt)
     {
+        // Headless recorder escape hatch: lab targets present self-signed certs; when this is
+        // set, skip the interactive dialog entirely so automated drivers never stall on it.
+        if (string.Equals(Environment.GetEnvironmentVariable("RDPILOT_TRUST_ANY_CERT"), "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return CertificateTrustDecision.TrustAlways;
+        }
+
         var trustedFingerprint = _certificateTrustStore.GetTrustedFingerprint(prompt.Host, prompt.Port);
         if (!string.IsNullOrWhiteSpace(trustedFingerprint) && string.Equals(trustedFingerprint, prompt.Fingerprint, StringComparison.OrdinalIgnoreCase))
         {
