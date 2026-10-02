@@ -71,3 +71,38 @@ jobs:
           name: freerdp-wrapper-win-x64
           path: ghost-artifact/
           if-no-files-found: error
+
+      - name: Build x86 wrapper
+        shell: pwsh
+        # The immybot agent runs 32-bit (win-x86) and cannot load x64 natives —
+        # produce a 32-bit freerdp_wrapper + FreeRDP runtime set alongside x64.
+        # Build-only: the test runner is x64 and would not load an x86 wrapper.
+        run: dotnet build RDPilot.slnx --configuration Release -p:NativeWrapperVcpkgTriplet=x86-windows -p:RuntimeIdentifier=win-x86
+
+      - name: Collect x86 wrapper artifact
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "ghost-artifact-x86"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          # Match the wrapper by PE machine type (the x64 one from the Test step
+          # also exists; I386 = 0x014C).
+          $x86 = Get-ChildItem -Recurse -Filter "freerdp_wrapper.dll" |
+            Where-Object { $_.FullName -notmatch '\\(obj|bin)\\vcpkg' } |
+            Where-Object {
+              $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+              $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+              [BitConverter]::ToUInt16($bytes, $peOff + 4) -eq 0x014C
+            } | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $x86) { throw "x86 freerdp_wrapper.dll not found after build." }
+          Copy-Item $x86.FullName $out
+          $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\x86-windows\bin"
+          if (-not (Test-Path $vcpkgBin)) { throw "vcpkg runtime bin not found at $vcpkgBin" }
+          Copy-Item (Join-Path $vcpkgBin "*.dll") $out
+          Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
+
+      - name: Upload x86 ghost artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freerdp-wrapper-win-x86
+          path: ghost-artifact-x86/
+          if-no-files-found: error
