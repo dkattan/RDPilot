@@ -21,7 +21,8 @@
         <NativeWrapperCMakeArgs Condition="'$(NativeWrapperUseVcpkg)' == 'true' and '$(NativeWrapperCMakeArgs)' == ''">-DCMAKE_TOOLCHAIN_FILE=$(NativeWrapperVcpkgRoot)/scripts/buildsystems/vcpkg.cmake -DVCPKG_MANIFEST_DIR=$(NativeWrapperVcpkgManifestDir) -DVCPKG_INSTALLED_DIR=$(NativeWrapperVcpkgInstalledDir) -DVCPKG_OVERLAY_PORTS=$(NativeWrapperVcpkgOverlayPorts)</NativeWrapperCMakeArgs>
         <NativeWrapperBuildFlavor Condition="'$(NativeWrapperBuildFlavor)' == '' and '$(NativeWrapperUseVcpkg)' == 'true'">vcpkg-msvc</NativeWrapperBuildFlavor>
         <NativeWrapperBuildFlavor Condition="'$(NativeWrapperBuildFlavor)' == ''">native</NativeWrapperBuildFlavor>
-        <NativeWrapperBuildDir>$(NativeWrapperProjectDir)/build/$(NativeWrapperBuildFlavor)</NativeWrapperBuildDir>
+        <NativeWrapperBuildDir>$(NativeWrapperProjectDir)/build/$(NativeWrapperBuildFlavor)-$(NativeWrapperVcpkgTriplet)</NativeWrapperBuildDir>
+        <NativeWrapperCMakePlatform Condition="'$(NativeWrapperCMakePlatform)' == ''"></NativeWrapperCMakePlatform>
         <NativeWrapperCMakeExe Condition="'$(NativeWrapperCMakeExe)' == ''">cmake</NativeWrapperCMakeExe>
     </PropertyGroup>
 
@@ -38,7 +39,7 @@
     <Target Name="BuildNativeWrapper" BeforeTargets="BeforeBuild">
         <Message Importance="High" Text="Building Native Wrapper..." />
         <MakeDir Directories="$(NativeWrapperBuildDir)" />
-        <Exec Command="&quot;$(NativeWrapperCMakeExe)&quot; --no-warn-unused-cli -S &quot;$(NativeWrapperProjectDir)&quot; -B &quot;$(NativeWrapperBuildDir)&quot; -DCMAKE_BUILD_TYPE=$(Configuration) $(NativeWrapperCMakeArgs)" />
+        <Exec Command="&quot;$(NativeWrapperCMakeExe)&quot; --no-warn-unused-cli -S &quot;$(NativeWrapperProjectDir)&quot; -B &quot;$(NativeWrapperBuildDir)&quot; -DCMAKE_BUILD_TYPE=$(Configuration) $(NativeWrapperCMakeArgs) $(NativeWrapperCMakePlatform)" />
         <Exec Command="&quot;$(NativeWrapperCMakeExe)&quot; --build &quot;$(NativeWrapperBuildDir)&quot; --config $(Configuration)" />
 
         <ItemGroup>
