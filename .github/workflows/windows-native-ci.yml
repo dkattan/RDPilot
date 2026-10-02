@@ -61,7 +61,7 @@ jobs:
           # FreeRDP/WinPR runtime DLLs from the vcpkg installed tree
           $vcpkgBin = Join-Path $env:VCPKG_ROOT "installed\x64-windows\bin"
           if (Test-Path $vcpkgBin) {
-            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -ErrorAction SilentlyContinue
+            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -Force -ErrorAction SilentlyContinue
           }
           Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
 
@@ -85,7 +85,7 @@ jobs:
           # FreeRDP/WinPR runtime DLLs from the vcpkg installed tree
           $vcpkgBin = Join-Path $env:VCPKG_ROOT "installed\x64-windows\bin"
           if (Test-Path $vcpkgBin) {
-            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -ErrorAction SilentlyContinue
+            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -Force -ErrorAction SilentlyContinue
           }
           Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
 
