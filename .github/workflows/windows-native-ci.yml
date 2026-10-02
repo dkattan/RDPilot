@@ -58,18 +58,11 @@ jobs:
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $wrapper) { throw "freerdp_wrapper.dll not found after build." }
           Copy-Item $wrapper.FullName $out
-          # Manifest mode: MSBuild copies the vcpkg runtime DLLs next to the wrapper
-          $wrapperDir = Split-Path $wrapper.FullName
-          $runtime = Get-ChildItem $wrapperDir -Filter "*.dll" |
-            Where-Object { $_.Name -ne "freerdp_wrapper.dll" }
-          $runtime | Copy-Item -Destination $out
-          # Fallback: classic (non-manifest) vcpkg installed tree
-          if (-not $runtime) {
-            $vcpkgBin = Join-Path $env:VCPKG_ROOT "installed\x64-windows\bin"
-            if (Test-Path $vcpkgBin) {
-              Copy-Item (Join-Path $vcpkgBin "*.dll") $out -ErrorAction SilentlyContinue
-            }
-          }
+          # Runtime DLLs from the vcpkg manifest install tree
+          # (csproj passes -DVCPKG_INSTALLED_DIR=<repo>\vcpkg_installed)
+          $vcpkgBin = Join-Path $env:GITHUB_WORKSPACE "vcpkg_installed\x64-windows\bin"
+          if (-not (Test-Path $vcpkgBin)) { throw "vcpkg runtime bin not found at $vcpkgBin" }
+          Copy-Item (Join-Path $vcpkgBin "*.dll") $out
           Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
 
       - name: Upload ghost artifact
