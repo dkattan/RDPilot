@@ -77,7 +77,7 @@ jobs:
         # The immybot agent runs 32-bit (win-x86) and cannot load x64 natives —
         # produce a 32-bit freerdp_wrapper + FreeRDP runtime set alongside x64.
         # Build-only: the test runner is x64 and would not load an x86 wrapper.
-        run: dotnet build RDPilot.slnx --configuration Release -p:NativeWrapperVcpkgTriplet=x86-windows -p:RuntimeIdentifier=win-x86
+        run: dotnet build RDPilot/RDPilot.Client/RDPilot.Client.csproj --configuration Release -p:NativeWrapperVcpkgTriplet=x86-windows -p:RuntimeIdentifier=win-x86
 
       - name: Collect x86 wrapper artifact
         shell: pwsh
