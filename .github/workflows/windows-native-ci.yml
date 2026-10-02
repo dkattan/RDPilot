@@ -47,3 +47,51 @@ jobs:
       - name: Test
         shell: pwsh
         run: dotnet test RDPilot.slnx --configuration Release
+
+      - name: Collect wrapper artifact
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "ghost-artifact"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $wrapper = Get-ChildItem -Recurse -Filter "freerdp_wrapper.dll" |
+            Where-Object { $_.FullName -notmatch '\\(obj|bin)\\vcpkg' } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $wrapper) { throw "freerdp_wrapper.dll not found after build." }
+          Copy-Item $wrapper.FullName $out
+          # FreeRDP/WinPR runtime DLLs from the vcpkg installed tree
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT "installed\x64-windows\bin"
+          if (Test-Path $vcpkgBin) {
+            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -ErrorAction SilentlyContinue
+          }
+          Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
+
+      - name: Upload ghost artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freerdp-wrapper-win-x64
+          path: ghost-artifact/
+          if-no-files-found: error
+
+      - name: Collect wrapper artifact
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "ghost-artifact"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $wrapper = Get-ChildItem -Recurse -Filter "freerdp_wrapper.dll" |
+            Where-Object { $_.FullName -notmatch '\\(obj|bin)\\vcpkg' } |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $wrapper) { throw "freerdp_wrapper.dll not found after build." }
+          Copy-Item $wrapper.FullName $out
+          # FreeRDP/WinPR runtime DLLs from the vcpkg installed tree
+          $vcpkgBin = Join-Path $env:VCPKG_ROOT "installed\x64-windows\bin"
+          if (Test-Path $vcpkgBin) {
+            Copy-Item (Join-Path $vcpkgBin "*.dll") $out -ErrorAction SilentlyContinue
+          }
+          Get-ChildItem $out | Select-Object Name, Length | Format-Table | Out-String
+
+      - name: Upload ghost artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: freerdp-wrapper-win-x64
+          path: ghost-artifact/
+          if-no-files-found: error
